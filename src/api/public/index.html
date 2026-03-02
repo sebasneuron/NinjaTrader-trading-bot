@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ninja Trade Assistant</title>
+  <style>
+    :root { --bg: #0f1419; --card: #1a2332; --accent: #38bdf8; --text: #e7e9ea; --muted: #71767b; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1rem; }
+    h1 { font-size: 1.25rem; margin: 0 0 1rem; color: var(--accent); }
+    section { background: var(--card); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .pending { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .signal { padding: 0.5rem 0.75rem; border-radius: 6px; display: flex; align-items: center; gap: 0.5rem; }
+    .signal.long { background: rgba(34,197,94,0.2); border: 1px solid #22c55e; }
+    .signal.short { background: rgba(239,68,68,0.2); border: 1px solid #ef4444; }
+    button { cursor: pointer; padding: 0.35rem 0.75rem; border-radius: 4px; border: none; font-size: 0.875rem; }
+    .btn-confirm { background: #22c55e; color: #fff; }
+    .btn-reject { background: #71767b; color: #fff; }
+    #log { font-family: monospace; font-size: 0.75rem; max-height: 200px; overflow-y: auto; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>Ninja Trade Assistant</h1>
+  <section>
+    <strong>Pending signals (click to execute)</strong>
+    <div id="pending" class="pending"></div>
+  </section>
+  <section>
+    <strong>Positions</strong>
+    <pre id="positions">-</pre>
+  </section>
+  <section>
+    <strong>Live log</strong>
+    <div id="log"></div>
+  </section>
+  <script>
+    const API = '';
+    const WS = 'ws://' + location.host + '/ws';
+    const log = (msg) => {
+      const el = document.getElementById('log');
+      el.textContent = new Date().toISOString() + ' ' + msg + '\n' + el.textContent;
+    };
+    const refresh = async () => {
+      try {
+        const r = await fetch('/api/signals/pending');
+        const { pending } = await r.json();
+        const div = document.getElementById('pending');
+        div.innerHTML = pending.length ? pending.map(p => `
+          <div class="signal ${p.signal.side}">
+            <span>${p.signal.side} ${p.signal.instrument} @ ${p.signal.price ?? '-'}</span>
+            <button class="btn-confirm" data-id="${p.signal.id}">Execute</button>
+            <button class="btn-reject" data-id="${p.signal.id}">Reject</button>
+          </div>
+        `).join('') : '<span class="muted">No pending signals</span>';
+        div.querySelectorAll('.btn-confirm').forEach(b => b.addEventListener('click', async () => {
+          const id = b.dataset.id;
+          const res = await fetch('/api/signals/confirm/' + id, { method: 'POST' });
+          const j = await res.json();
+          log(j.orderId ? 'Order sent: ' + j.orderId : 'Error: ' + (j.error || 'unknown'));
+          refresh();
+        }));
+        div.querySelectorAll('.btn-reject').forEach(b => b.addEventListener('click', async () => {
+          await fetch('/api/signals/reject/' + b.dataset.id, { method: 'POST' });
+          refresh();
+        }));
+      } catch (e) { log('Error: ' + e.message); }
+      try {
+        const r = await fetch('/api/account/positions');
+        const { positions } = await r.json();
+        document.getElementById('positions').textContent = JSON.stringify(positions || [], null, 2);
+      } catch (e) { document.getElementById('positions').textContent = e.message; }
+    };
+    const ws = new WebSocket(WS);
+    ws.onmessage = (e) => { const d = JSON.parse(e.data); log(d.type + ': ' + JSON.stringify(d.payload)); refresh(); };
+    ws.onopen = () => log('WebSocket connected');
+    setInterval(refresh, 3000);
+    refresh();
+  </script>
+</body>
+</html>
